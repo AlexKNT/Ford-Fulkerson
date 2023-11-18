@@ -1,42 +1,13 @@
 #include <iostream>
 #include <vector>
 #include <queue>
-#include <cstring>
 #include <limits>
 
-// The Ford-Fulkerson algorithm is a method for finding the maximum flow in a flow network, 
-// which is a directed graph representing the flow of resources from a source node to a sink node through a network of interconnected nodes.
-
-/* 
-    Here's a step-by-step explanation of how it works:
-
-    Initialization: Start with an initial flow of zero on all edges.
-
-    Find Augmenting Paths: While there exists a path from the source to the sink in the residual graph (a modified version of the original graph), 
-    find an augmenting path. 
-    An augmenting path is a path from the source to the sink through edges with available capacity (capacity minus flow is greater than zero).
-
-    Find Bottleneck Capacity: On the augmenting path, find the edge with the minimum available capacity. This capacity is called the bottleneck capacity.
-
-    Update Flow: Increase the flow on each edge of the augmenting path by the bottleneck capacity. Decrease the flow on the reverse edges (if the graph is directed) by the same amount.
-
-    Repeat: Go back to step 2 and repeat the process until no more augmenting paths can be found.
-
-    Termination: When there are no more augmenting paths, the algorithm terminates, and the flow obtained at that point is the maximum flow in the network.
-*/
-
-
-constexpr int INF = std::numeric_limits<int>::max();
-
-// maximum number of vertices (nodes) in the flow network
-constexpr int MAX_V = 100;
-
+/**
+ * @brief Represents a directed edge in the graph.
+ */
 struct Edge {
-    int to, capacity, flow;
-    // This is the constructor of the Edge struct. 
-    // It allows you to create an Edge object and initialize its to, capacity, and flow members with the provided values. 
-    // The constructor sets the flow to 0 by default.
-    Edge(int t, int c) : to(t), capacity(c), flow(0) {}
+    int from, to, capacity, flow;
 };
 
 /**
@@ -99,75 +70,80 @@ Graph::Graph(int numVertices) : numVertices(numVertices) {
     graph.resize(numVertices);
 }
 
-bool findAugmentingPath(int source, int sink) {
-    std::memset(visited, 0, sizeof(visited)); // Reset the visited array
+void Graph::addEdge(int from, int to, int capacity) {
+    graph[from].push_back(edges.size());
+    edges.push_back({ from, to, capacity, 0 });
+}
 
+int Graph::fordFulkerson(int source, int sink) {
+    initializeResidualCapacity();
+
+    int maxFlow = 0;
+
+    // Continue finding augmenting paths until no more paths can be found
+    std::vector<int> parent(numVertices);
+    while (bfs(parent, sink)) {
+        int bottleneck = updateResidualGraph(source, sink, parent);
+        if (bottleneck == 0) {
+            break;  // No augmenting path found
+        }
+        maxFlow += bottleneck;
+    }
+
+    return maxFlow;
+}
+
+void Graph::initializeResidualCapacity() {
+    residualCapacity.assign(numVertices, std::vector<int>(numVertices, 0));
+
+    // Initialize residual capacity based on the original graph
+    for (const Edge& edge : edges) {
+        residualCapacity[edge.from][edge.to] = edge.capacity;
+    }
+}
+
+bool Graph::bfs(std::vector<int>& parent, int sink) {
+    parent.assign(numVertices, -1);
     std::queue<int> q;
-    q.push(source);
-    visited[source] = true;
+    q.push(0); // Start BFS from the source vertex
 
     while (!q.empty()) {
-        int u = q.front();
+        int current = q.front();
         q.pop();
 
-        for (Edge& edge : graph[u]) {
-            int v = edge.to;
-            // Check if the edge is not visited and has remaining capacity
-            if (visited[v] || edge.capacity - edge.flow <= 0) {
-                continue; // Skip this edge if it's not eligible
+        for (int i : graph[current]) {
+            const Edge& edge = edges[i];
+            if (edge.to == sink && residualCapacity[edge.from][edge.to] > 0) {
+                parent[edge.to] = edge.from;
+                return true;  // Stop BFS if the sink vertex is reached
             }
-
-            q.push(v); // Add the node to the queue
-            visited[v] = true; // Mark the node as visited
-        }
-    }
-
-    // Returns true if an augmenting path from source to sink is found
-    return visited[sink];
-}
-
-
-int getMinCapacity(int source, int sink) {
-    int minCapacity = INF;
-    for (int v = sink; v != source; v = graph[v][0].to) {
-        for (Edge& edge : graph[v]) {
-            if (visited[edge.to]) {
-                // Find the minimum capacity along the path
-                minCapacity = std::min(minCapacity, edge.capacity - edge.flow);
-                break; // Break to avoid unnecessary iterations
+            if (parent[edge.to] == -1 && residualCapacity[edge.from][edge.to] > 0) {
+                parent[edge.to] = edge.from;
+                q.push(edge.to);
             }
         }
     }
-    return minCapacity;
+
+    return false;
 }
 
-void updateFlow(int source, int sink, int minCapacity) {
-    for (int v = sink; v != source; v = graph[v][0].to) {
-        for (Edge& edge : graph[v]) {
-            if (visited[edge.to]) {
-                edge.flow += minCapacity; // Increase the forward flow
-                for (Edge& backEdge : graph[edge.to]) {
-                    if (backEdge.to == v) {
-                        backEdge.flow -= minCapacity; // Decrease the backward flow
-                        break; // Break to avoid unnecessary iterations
-                    }
-                }
-                break; // Break to avoid unnecessary iterations
-            }
-        }
-    }
-}
+int Graph::updateResidualGraph(int source, int sink, const std::vector<int>& parent) {
+    int bottleneck = std::numeric_limits<int>::max();
 
-int fordFulkerson(int source, int sink) {
-    int maxFlow = 0; // Initialize the maximum flow to 0
-
-    while (findAugmentingPath(source, sink)) {
-        int minCapacity = getMinCapacity(source, sink);
-        updateFlow(source, sink, minCapacity);
-        maxFlow += minCapacity; // Update the maximum flow with the path's capacity
+    // Find the bottleneck capacity along the augmenting path
+    for (int current = sink; current != source; current = parent[current]) {
+        int parentIdx = parent[current];
+        bottleneck = std::min(bottleneck, residualCapacity[parentIdx][current]);
     }
 
-    return maxFlow; // Return the maximum flow
+    // Update the residual capacities of the edges along the augmenting path
+    for (int current = sink; current != source; current = parent[current]) {
+        int parentIdx = parent[current];
+        residualCapacity[parentIdx][current] -= bottleneck;
+        residualCapacity[current][parentIdx] += bottleneck;
+    }
+
+    return bottleneck;
 }
 
 int main() {
@@ -180,7 +156,7 @@ int main() {
 
     Graph graph(numVertices);
 
-    std::cout << "Enter edges in the format (from to capacity):" << std::endl;
+    std::cout << "Enter edges in the format (from to capacity) (example: 0 1 2. edge goes from vertex 0 to vertex 1 and has value of 2) starts from 0:\n";
     for (int i = 0; i < numEdges; ++i) {
         int from, to, capacity;
         std::cin >> from >> to >> capacity;
